@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Despliegue de la aplicación BTG Pactual - Gestión de Fondos de Inversión
+
+Parameters:
+  KeyName:
+    Description: Nombre del par de claves EC2 para acceso SSH
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: key-0c69cf15b275ffc68
+    ConstraintDescription: Debe ser un par de claves existente.
+
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      ImageId: ami-0c02fb55956c7d316
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      SubnetId: !Ref PublicSubnet
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras install java-openjdk17 -y
+          yum install git -y
+          wget https://archive.apache.org/dist/maven/maven-3/3.8.7/binaries/apache-maven-3.8.7-bin.tar.gz
+          tar xzf apache-maven-3.8.7-bin.tar.gz -C /opt
+          ln -s /opt/apache-maven-3.8.7 /opt/maven
+          echo 'export MAVEN_HOME=/opt/maven' >> /etc/profile.d/maven.sh
+          echo 'export PATH=${MAVEN_HOME}/bin:${PATH}' >> /etc/profile.d/maven.sh
+          source /etc/profile.d/maven.sh
+          cat <<EOF > /etc/yum.repos.d/mongodb-org-6.0.repo
+          [mongodb-org-6.0]
+          name=MongoDB Repository
+          baseurl=https://repo.mongodb.org/yum/amazon/2/mongodb-org/6.0/x86_64/
+          gpgcheck=1
+          enabled=1
+          gpgkey=https://www.mongodb.org/static/pgp/server-6.0.asc
+          EOF
+          yum install -y mongodb-org
+          systemctl start mongod
+          systemctl enable mongod
+          cd /home/ec2-user
+          git clone https://github.com/LuisAlejandroOspinaGarzon2/btg-pactual-backend
+          cd btg-pactual-backend
+          mvn clean install
+          nohup mvn spring-boot:run &
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permitir acceso SSH y HTTP
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+Outputs:
+  InstancePublicIP:
+    Value: !GetAtt EC2Instance.PublicIp
+  WebURL:
+    Value: !Sub "http://${EC2Instance.PublicIp}:8080"
