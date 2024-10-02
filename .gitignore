@@ -1,0 +1,15 @@
+# Maven
+target/
+*.log
+*.tmp
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# Sistema
+*.class
+*.jar
+*.war
+*.ear
